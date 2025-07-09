@@ -31,6 +31,22 @@ export default defineConfig(({ command, mode }) => {
       host: true,
       open: false,
       strictPort: false,
+      hmr: {
+        // Explicitly configure HMR
+        protocol: 'ws',
+        host: 'localhost',
+        // Don't specify port to use server port automatically
+        // Increase timeout for WebSocket connection
+        timeout: 30000,
+        // Don't specify clientPort to use server port automatically
+        overlay: true
+      },
+      cors: {
+        // Enable CORS for all origins
+        origin: '*',
+        methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE'],
+        credentials: true
+      },
       proxy: {
         // Main API proxy configuration
         '^/api/(?!terminals/.*\\/ws$).*': { // Don't proxy WebSocket upgrades

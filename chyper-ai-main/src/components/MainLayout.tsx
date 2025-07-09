@@ -2,7 +2,6 @@ import React from 'react';
 import { Sidebar } from './Sidebar';
 import { DevToolsBar } from './DevToolsBar';
 import { MasterChatAgent } from './MasterChatAgent';
-import { AuthDebug } from './auth/AuthDebug';
 import { useTheme } from '../contexts/ThemeContext';
 
 interface PinnedProject {
@@ -51,7 +50,6 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
         </div>
         <MasterChatAgent />
       </div>
-      {import.meta.env.DEV && <AuthDebug />}
     </div>
   );
 };

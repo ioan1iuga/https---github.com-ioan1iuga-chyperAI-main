@@ -44,6 +44,7 @@ export class FileProcessingService {
   private audioExtensions: string[] = ['mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a'];
   private videoExtensions: string[] = ['mp4', 'webm', 'mov', 'avi', 'mkv', 'flv', 'wmv'];
   private archiveExtensions: string[] = ['zip', 'rar', 'tar', 'gz', '7z', 'bz2', 'xz', 'iso'];
+  private uploadBaseUrl: string = 'https://storage.chyper-ai.com/'; // Base URL for uploaded files
   
   private codeFileExtensions: Record<string, string[]> = {
     javascript: ['js', 'jsx', 'mjs', 'cjs'],
@@ -217,6 +218,32 @@ export class FileProcessingService {
         charCount: processedFile.metadata?.charCount || 0
       }
     };
+  }
+
+  /**
+   * Upload a file to storage and return the URL and file path
+   */
+  async uploadFile(file: File): Promise<{ url: string; filePath: string }> {
+    try {
+      // Generate a unique ID for the file
+      const id = `${Date.now()}_${uuidv4().substring(0, 8)}`;
+      
+      // Create file path (could be customized based on project structure)
+      const filePath = `uploads/${id}/${file.name}`;
+      
+      // In a real implementation, this would upload the file to a storage service
+      // For now, we'll simulate a successful upload
+      
+      // Construct the URL where the file would be accessible
+      const url = `${this.uploadBaseUrl}${filePath}`;
+      
+      console.log(`File uploaded: ${file.name} to ${filePath}`);
+      
+      return { url, filePath };
+    } catch (error) {
+      console.error('Error uploading file:', error);
+      throw new Error(`Error uploading file: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
   }
 
   /**
@@ -480,6 +507,22 @@ export class FileProcessingService {
     }
     
     return this.archiveExtensions.includes(extension);
+  }
+
+  /**
+   * Check if a file is a code file
+   */
+  private isCodeFile(extension: string): boolean {
+    if (!extension) return false;
+    
+    // Check if the extension is in any of the code language arrays
+    for (const extensions of Object.values(this.codeFileExtensions)) {
+      if (extensions.includes(extension)) {
+        return true;
+      }
+    }
+    
+    return false;
   }
 
   /**

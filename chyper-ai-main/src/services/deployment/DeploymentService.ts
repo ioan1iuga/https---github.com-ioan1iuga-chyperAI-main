@@ -3,7 +3,7 @@ import { toastManager } from '../../utils/toastManager';
 
 interface DeploymentOptions {
   projectId: string;
-  environment?: 'development' | 'staging' | 'production';
+  environment?: 'development' | 'staging' | 'production' | 'preview';
   provider?: 'cloudflare' | 'vercel' | 'netlify';
   buildCommand?: string;
   outputDir?: string;
@@ -29,14 +29,24 @@ interface DeploymentLogEntry {
  */
 class DeploymentService {
   private apiUrl: string;
+  private activeProjectId: string | null = null;
+  private deploymentSubscribers: Set<(deployment: any) => void> = new Set();
   
   constructor() {
     // Initialize with API URL based on environment
-    this.apiUrl = import.meta.env.VITE_SUPABASE_FUNCTIONS_URL 
+    this.apiUrl = import.meta.env.VITE_SUPABASE_FUNCTIONS_URL
       ? `${import.meta.env.VITE_SUPABASE_FUNCTIONS_URL}/deployments`
       : '/api/deployments';
       
     logger.debug('DeploymentService initialized', { apiUrl: this.apiUrl });
+  }
+  
+  /**
+   * Sets the active project for deployment operations
+   */
+  setActiveProject(projectId: string): void {
+    this.activeProjectId = projectId;
+    logger.info('Set active project for deployment', { projectId });
   }
   
   /**
@@ -47,7 +57,7 @@ class DeploymentService {
       logger.info('Fetching deployments', { projectId });
       
       // Build URL with optional project ID filter
-      const url = projectId 
+      const url = projectId
         ? `${this.apiUrl}?projectId=${encodeURIComponent(projectId)}`
         : this.apiUrl;
       
@@ -60,7 +70,7 @@ class DeploymentService {
         throw new Error(`Failed to fetch deployments: ${response.statusText}`);
       }
       
-      const result = await response.json();
+      const result = await response.json() as any;
       
       // Handle both response formats (direct array or success/data object)
       const deployments = Array.isArray(result) ? result : (result.data || []);
@@ -88,7 +98,7 @@ class DeploymentService {
         throw new Error(`Failed to fetch deployment: ${response.statusText}`);
       }
       
-      const result = await response.json();
+      const result = await response.json() as any;
       
       // Handle both response formats
       return result.data || result;
@@ -124,11 +134,11 @@ class DeploymentService {
       });
       
       if (!response.ok) {
-        const errorData = await response.json();
+        const errorData = await response.json() as any;
         throw new Error(errorData.error || `Failed to create deployment: ${response.statusText}`);
       }
       
-      const result = await response.json();
+      const result = await response.json() as any;
       const deploymentData = result.data || result;
       
       // Start polling for deployment status updates
@@ -196,6 +206,9 @@ class DeploymentService {
         
         try {
           const deployment = await this.getDeployment(id);
+          
+          // Notify subscribers of the updated deployment
+          this.notifySubscribers(deployment);
           
           // Update UI based on status
           if (deployment.status === 'success') {
@@ -277,6 +290,59 @@ class DeploymentService {
     }
     
     return headers;
+  }
+  /**
+   * Deploy a project to the specified provider and environment
+   */
+  async deployProject(
+    provider: 'netlify' | 'vercel' | 'cloudflare',
+    environment: 'production' | 'staging' | 'preview',
+    options: {
+      buildCommand: string;
+      outputDir: string;
+      environmentVariables?: Record<string, string>;
+    }
+  ): Promise<DeploymentResult> {
+    if (!this.activeProjectId) {
+      throw new Error('No active project selected');
+    }
+    
+    return this.createDeployment({
+      projectId: this.activeProjectId,
+      provider,
+      environment,
+      buildCommand: options.buildCommand,
+      outputDir: options.outputDir,
+      environmentVariables: options.environmentVariables
+    });
+  }
+  
+  /**
+   * Subscribe to deployment updates
+   * Returns an unsubscribe function
+   */
+  subscribeToDeployments(callback: (updatedDeployment: any) => void): () => void {
+    this.deploymentSubscribers.add(callback);
+    
+    // Return unsubscribe function
+    return () => {
+      this.deploymentSubscribers.delete(callback);
+    };
+  }
+  
+  
+  /**
+   * Notify subscribers of deployment updates
+   * This is called internally when a deployment status changes
+   */
+  private notifySubscribers(deployment: any): void {
+    this.deploymentSubscribers.forEach(callback => {
+      try {
+        callback(deployment);
+      } catch (error) {
+        logger.error('Error in deployment subscriber callback', { error });
+      }
+    });
   }
 }
 

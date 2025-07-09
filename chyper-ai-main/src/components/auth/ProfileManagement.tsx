@@ -1,9 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useForm, SubmitHandler } from 'react-hook-form';
 import { Camera, Upload, Check, AlertCircle, Loader, Save, X, Eye, EyeOff } from 'lucide-react';
-import { useAuth } from '../../contexts/AuthContext';
+import { useEnhancedAuth } from '../../contexts/EnhancedAuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
-import { UserProfile } from '../../contexts/AuthContext';
+import { UserProfile } from '../../contexts/EnhancedAuthContext';
 
 interface ProfileFormInputs {
   name: string;
@@ -17,7 +17,7 @@ interface ProfileFormInputs {
 export const ProfileManagement: React.FC = () => {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
-  const { profile, updateProfile, updateEmail, updatePassword, uploadAvatar } = useAuth();
+  const { profile, updateProfile, updateEmail, updatePassword, uploadAvatar } = useEnhancedAuth();
   
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
@@ -266,8 +266,10 @@ export const ProfileManagement: React.FC = () => {
               id="avatar"
               accept="image/jpeg, image/png, image/gif"
               className="hidden"
+              {...register('avatar', {
+                required: false
+              })}
               ref={fileInputRef}
-              {...register('avatar')}
               disabled={isLoading}
             />
           </div>

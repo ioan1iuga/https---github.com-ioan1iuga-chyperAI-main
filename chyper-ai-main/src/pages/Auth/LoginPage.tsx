@@ -1,14 +1,34 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useTheme } from '../../contexts/ThemeContext';
 import { LoginForm } from '../../components/auth/LoginForm';
-import { Code, Check, AlertCircle } from 'lucide-react';
-import { useAuth } from '../../contexts/AuthContext';
-import { Link } from 'react-router-dom';
+import { Code, Check, AlertCircle, Bug, Loader } from 'lucide-react';
+import { useEnhancedAuth } from '../../contexts/EnhancedAuthContext';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { AuthDebug } from '../../components/auth/AuthDebug';
+import { logger } from '../../utils/errorHandling';
 
 export const LoginPage: React.FC = () => {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
-  const { isSupabaseConfigured, configError } = useAuth();
+  const { isSupabaseConfigured, configError, isAuthenticated, isLoading } = useEnhancedAuth();
+  const [showDebug, setShowDebug] = useState(import.meta.env.DEV);
+  const navigate = useNavigate();
+  const location = useLocation();
+  
+  // Redirect to dashboard if already authenticated
+  useEffect(() => {
+    if (isAuthenticated && !isLoading) {
+      logger.info('User already authenticated, redirecting to dashboard');
+      
+      // Get the return URL from location state or default to dashboard
+      const returnTo = location.state?.returnTo || '/dashboard';
+      
+      // Add a longer delay to ensure all auth state is properly updated
+      setTimeout(() => {
+        navigate(returnTo, { replace: true });
+      }, 500);
+    }
+  }, [isAuthenticated, isLoading, navigate, location.state]);
 
   return (
     <div className={`flex min-h-screen ${
@@ -51,6 +71,23 @@ export const LoginPage: React.FC = () => {
             </p>
           </div>
           <LoginForm />
+          
+          {/* Debug toggle button */}
+          {import.meta.env.DEV && (
+            <div className="mt-4 text-center">
+              <button
+                onClick={() => setShowDebug(!showDebug)}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded ${
+                  isDark
+                    ? 'bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700'
+                    : 'bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-200'
+                }`}
+              >
+                <Bug size={14} />
+                {showDebug ? 'Hide Debug Panel' : 'Show Debug Panel'}
+              </button>
+            </div>
+          )}
         </div>
       </div>
       
@@ -84,6 +121,9 @@ export const LoginPage: React.FC = () => {
               </div>
             </div>
           </div>
+          
+          {/* Auth Debug Panel */}
+          {showDebug && <AuthDebug />}
         </div>
       </div>
     </div>

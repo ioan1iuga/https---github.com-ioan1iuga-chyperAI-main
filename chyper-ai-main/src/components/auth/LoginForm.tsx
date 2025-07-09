@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useForm, SubmitHandler } from 'react-hook-form';
 import { Eye, EyeOff, AlertCircle, Loader, Github as GitHub, Mail, ExternalLink } from 'lucide-react';
-import { useAuth, SupabaseLoginError } from '../../contexts/AuthContext';
+import { useEnhancedAuth, SupabaseLoginError } from '../../contexts/EnhancedAuthContext';
 import { logger } from '../../utils/errorHandling';
 import { useTheme } from '../../contexts/ThemeContext';
 
@@ -22,7 +22,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({
   const navigate = useNavigate();
   const { theme } = useTheme();
   const isDark = theme === 'dark';
-  const { signIn, signInWithProvider, isSupabaseConfigured, configError } = useAuth();
+  const { signIn, signInWithProvider, isSupabaseConfigured, configError } = useEnhancedAuth();
   
   const [showPassword, setShowPassword] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -109,7 +109,11 @@ export const LoginForm: React.FC<LoginFormProps> = ({
 
   const handleSocialLogin = async (provider: 'github') => {
     try {
-      logger.info('Attempting social login', { provider });
+      logger.info('Attempting social login', {
+        provider,
+        callbackUrl: import.meta.env.VITE_GITHUB_CALLBACK_URL || `${window.location.origin}/auth/callback`,
+        origin: window.location.origin
+      });
       
       // Check if Supabase is configured before attempting OAuth
       if (!isSupabaseConfigured) {
@@ -122,15 +126,26 @@ export const LoginForm: React.FC<LoginFormProps> = ({
       
       const result = await signInWithProvider(provider);
       
-      logger.info('Social login initiated', { success: result.success });
+      logger.info('Social login initiated', {
+        success: result.success,
+        provider,
+        callbackUrl: import.meta.env.VITE_GITHUB_CALLBACK_URL || `${window.location.origin}/auth/callback`
+      });
       
       if (!result.success) {
-        logger.error(`Social login error`, { error: result.error });
+        logger.error(`Social login error`, {
+          error: result.error,
+          provider,
+          callbackUrl: import.meta.env.VITE_GITHUB_CALLBACK_URL || `${window.location.origin}/auth/callback`
+        });
         setFormError(result.error || 'Failed to sign in with social provider');
         setSocialLoading(null);
       } else {
         // For OAuth, we don't need to redirect here since the OAuth flow will handle the redirect
-        logger.info('Social login flow started successfully');
+        logger.info('Social login flow started successfully', {
+          provider,
+          redirecting: true
+        });
         // No need to clear social loading as we'll be redirecting away
       }
     } catch (error) {

@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { useAuth } from './AuthContext';
+import { useEnhancedAuth } from './EnhancedAuthContext';
 import { useAI } from './AIContext';
 import { useProjects } from './ProjectsContext';
 import { logger } from '../utils/errorHandling';
@@ -9,6 +9,7 @@ import GitHubIntegrationService from '../services/github/GitHubIntegrationServic
 import CloudflareDeploymentService from '../services/deployment/CloudflareDeploymentService';
 import FileProcessingService from '../services/fileProcessing/FileProcessingService';
 import VoiceProcessingService from '../services/voiceProcessing/VoiceProcessingService';
+import { LLMOrchestrator, AgentType, Workflow, WorkflowStep } from '../services/llm/LLMOrchestrator';
 
 interface Message {
   id: string;
@@ -44,6 +45,19 @@ interface Assistant {
   isActive: boolean;
 }
 
+interface WorkflowStatus {
+  id: string;
+  name: string;
+  status: 'pending' | 'in-progress' | 'completed' | 'failed';
+  steps: {
+    id: string;
+    name: string;
+    status: 'pending' | 'in-progress' | 'completed' | 'failed';
+    agentType: string;
+  }[];
+  progress: number;
+}
+
 interface FileUpload {
   id: string;
   name: string;
@@ -62,6 +76,7 @@ interface MasterChatContextType {
   activeAssistant: Assistant | null;
   assistants: Assistant[];
   fileUploads: FileUpload[];
+  activeWorkflow: WorkflowStatus | null;
   
   // Session management
   createSession: () => void;
@@ -97,6 +112,10 @@ interface MasterChatContextType {
   
   // Route to specialized assistant
   routeToAssistant: (assistantId: string, contextData?: any) => Promise<void>;
+  
+  // Orchestration
+  getWorkflowStatus: (workflowId: string) => WorkflowStatus | null;
+  cancelWorkflow: (workflowId: string) => Promise<void>;
 }
 
 const MasterChatContext = createContext<MasterChatContextType | undefined>(undefined);
@@ -110,7 +129,7 @@ export const useMasterChat = () => {
 };
 
 export const MasterChatProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated } = useEnhancedAuth();
   const { activeProvider, currentModel } = useAI();
   const { createProject } = useProjects();
   
@@ -123,6 +142,13 @@ export const MasterChatProvider: React.FC<{ children: ReactNode }> = ({ children
   const [fileUploads, setFileUploads] = useState<FileUpload[]>([]);
   const [availableCommands, setAvailableCommands] = useState<Command[]>([]);
   const [voiceRecordingStop, setVoiceRecordingStop] = useState<(() => void) | null>(null);
+  const [activeWorkflow, setActiveWorkflow] = useState<WorkflowStatus | null>(null);
+  const [orchestrator] = useState<LLMOrchestrator>(new LLMOrchestrator({
+    maxConcurrentTasks: 3,
+    defaultProvider: 'anthropic',
+    defaultModel: 'claude-3-sonnet',
+    prioritizeOpenSource: true
+  }));
   
   // Initialize default session on mount
   useEffect(() => {
@@ -325,13 +351,19 @@ export const MasterChatProvider: React.FC<{ children: ReactNode }> = ({ children
       const { url, filePath } = await FileProcessingService.uploadFile(file);
       
       // Update file upload with content and URL
-      setFileUploads(prev => prev.map(f => 
+      setFileUploads(prev => prev.map(f =>
         f.id === fileId
           ? {
               ...f,
               content: typeof processedFile.content === 'string' ? processedFile.content : '[Binary content]',
               url,
-              analysis: processedFile.metadata.analysis
+              analysis: {
+                type: processedFile.metadata?.language ? 'code' : 'text',
+                language: processedFile.metadata?.language,
+                wordCount: processedFile.metadata?.wordCount,
+                lineCount: processedFile.metadata?.lineCount,
+                charCount: processedFile.metadata?.charCount
+              }
             }
           : f
       ));
@@ -402,49 +434,41 @@ export const MasterChatProvider: React.FC<{ children: ReactNode }> = ({ children
         };
       });
       
-      // In a real implementation, this would call the AI API
-      // For now, we'll simulate a response
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      // Use the LLMOrchestrator to process the message
+      const projectId = session.activeProjectId;
+      const result = await orchestrator.processMessage(content, projectId);
       
-      // Generate response based on input type
-      let response = '';
-      
-      if (source === 'voice') {
-        response = `I received your voice message: "${content}". How would you like me to proceed?`;
-      } else if (source === 'file') {
-        response = `I've processed your file and analyzed its contents. What would you like to do with it?`;
-      } else {
-        // Text input - analyze intent
-        if (content.toLowerCase().includes('create') || content.toLowerCase().includes('new project')) {
-          response = `I'd be happy to help you create a new project. What type of project would you like to create? For example:
+      // If a workflow was created, track it
+      if (result.workflow) {
+        const workflowStatus: WorkflowStatus = {
+          id: result.workflow.id,
+          name: result.workflow.name,
+          status: result.workflow.status,
+          steps: result.workflow.steps.map(step => ({
+            id: step.id,
+            name: step.name,
+            status: step.status,
+            agentType: step.agentType
+          })),
+          progress: 0
+        };
+        
+        setActiveWorkflow(workflowStatus);
+        
+        // Set up interval to update workflow status
+        const statusInterval = setInterval(async () => {
+          // Get updated workflow status
+          const updatedStatus = getWorkflowStatus(result.workflow!.id);
           
-1. A React frontend application
-2. A Node.js backend API
-3. A full-stack application
-4. A static website`;
-        } else if (content.toLowerCase().includes('deploy') || content.toLowerCase().includes('publish')) {
-          response = `I can help you deploy your application. Which project would you like to deploy and where? I support:
-          
-1. Cloudflare Workers
-2. GitHub Pages
-3. Netlify`;
-        } else if (content.toLowerCase().includes('github') || content.toLowerCase().includes('repository')) {
-          response = `I can help you with GitHub integration. Would you like me to:
-          
-1. Create a new repository
-2. Push your existing project to GitHub
-3. Set up continuous deployment`;
-        } else {
-          response = `I understand you're asking about "${content}". I can help with:
-          
-- Creating new projects
-- Writing and editing code
-- Setting up GitHub repositories
-- Deploying to Cloudflare Workers
-- Managing your applications
-          
-What specific help do you need today?`;
-        }
+          if (updatedStatus) {
+            setActiveWorkflow(updatedStatus);
+            
+            // If workflow is completed or failed, clear the interval
+            if (updatedStatus.status === 'completed' || updatedStatus.status === 'failed') {
+              clearInterval(statusInterval);
+            }
+          }
+        }, 1000);
       }
       
       // Replace the thinking message with the actual response
@@ -453,12 +477,13 @@ What specific help do you need today?`;
         
         return {
           ...prev,
-          messages: prev.messages.map(m => 
-            m.id === thinkingMessageId 
+          messages: prev.messages.map(m =>
+            m.id === thinkingMessageId
               ? {
                   ...m,
-                  content: response,
-                  status: 'processed'
+                  content: result.response,
+                  status: 'processed',
+                  metadata: result.workflow ? { workflowId: result.workflow.id } : undefined
                 }
               : m
           )
@@ -644,7 +669,7 @@ What specific help do you need today?`;
   /**
    * Create a new assistant
    */
-  const createAssistant = async (name: string, type: string) => {
+  const createAssistant = async (name: string, type: string): Promise<void> => {
     try {
       // In a real implementation, this would create in Supabase
       const newAssistant: Assistant = {
@@ -658,7 +683,7 @@ What specific help do you need today?`;
       setAssistants(prev => [...prev, newAssistant]);
       
       logger.info('Created new assistant', { id: newAssistant.id, name, type });
-      return newAssistant.id;
+      // No return value to match the Promise<void> interface
     } catch (error) {
       logger.error('Error creating assistant', error);
       throw error;
@@ -1310,6 +1335,74 @@ What specific help do you need today?`;
     }
   };
   
+  /**
+   * Get workflow status
+   */
+  const getWorkflowStatus = (workflowId: string): WorkflowStatus | null => {
+    try {
+      // Use orchestrator's public methods to get workflow status
+      const workflowInfo = orchestrator.processMessage(`Get status of workflow ${workflowId}`, undefined)
+        .then(result => {
+          if (result.workflow && result.workflow.id === workflowId) {
+            const completedSteps = result.workflow.steps.filter(s => s.status === 'completed').length;
+            const totalSteps = result.workflow.steps.length;
+            const progress = totalSteps > 0 ? Math.round((completedSteps / totalSteps) * 100) : 0;
+            
+            return {
+              id: result.workflow.id,
+              name: result.workflow.name,
+              status: result.workflow.status,
+              steps: result.workflow.steps.map(step => ({
+                id: step.id,
+                name: step.name,
+                status: step.status,
+                agentType: step.agentType
+              })),
+              progress
+            };
+          }
+          return null;
+        });
+      
+      // For immediate response, return the current activeWorkflow if it matches
+      if (activeWorkflow && activeWorkflow.id === workflowId) {
+        return activeWorkflow;
+      }
+      
+      return null;
+    } catch (error) {
+      logger.error('Error getting workflow status', { workflowId, error });
+      return null;
+    }
+  };
+  
+  /**
+   * Cancel a workflow
+   */
+  const cancelWorkflow = async (workflowId: string): Promise<void> => {
+    try {
+      logger.info('Cancelling workflow', { workflowId });
+      
+      // Send a cancellation message through the orchestrator
+      await orchestrator.processMessage(`Cancel workflow ${workflowId}`, undefined);
+      
+      // Update active workflow status if it matches
+      if (activeWorkflow?.id === workflowId) {
+        setActiveWorkflow({
+          ...activeWorkflow,
+          status: 'failed',
+          steps: activeWorkflow.steps.map(step => ({
+            ...step,
+            status: step.status === 'pending' || step.status === 'in-progress' ? 'failed' : step.status
+          }))
+        });
+      }
+    } catch (error) {
+      logger.error('Error cancelling workflow', error);
+      throw error;
+    }
+  };
+  
   // Context value
   const contextValue: MasterChatContextType = {
     session,
@@ -1319,6 +1412,7 @@ What specific help do you need today?`;
     activeAssistant,
     assistants,
     fileUploads,
+    activeWorkflow,
     
     createSession,
     loadSession,
@@ -1342,7 +1436,10 @@ What specific help do you need today?`;
     deployToCloudflare,
     
     createProjectFromPrompt,
-    routeToAssistant
+    routeToAssistant,
+    
+    getWorkflowStatus,
+    cancelWorkflow
   };
 
   return (

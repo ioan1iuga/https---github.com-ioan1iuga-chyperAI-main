@@ -1,29 +1,37 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { 
-  MessageSquare, 
-  Send, 
-  X, 
-  Mic, 
-  MicOff, 
-  Paperclip, 
-  Code, 
-  FileText, 
-  Zap, 
-  Upload, 
-  Download, 
-  Loader, 
-  Bot, 
-  Play, 
-  FilePlus2, 
-  RefreshCw, 
-  Github, 
-  CloudCog, 
-  Settings
+import {
+  MessageSquare,
+  Send,
+  X,
+  Mic,
+  MicOff,
+  Paperclip,
+  Code,
+  FileText,
+  Zap,
+  Upload,
+  Download,
+  Loader,
+  Bot,
+  Play,
+  FilePlus2,
+  RefreshCw,
+  Github,
+  CloudCog,
+  Settings,
+  Plus,
+  Activity,
+  XCircle,
+  CheckCircle2,
+  AlertCircle,
+  Clock,
+  Workflow
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
-import { useAuth } from '../contexts/AuthContext';
+import { useEnhancedAuth } from '../contexts/EnhancedAuthContext';
 import { useAI } from '../contexts/AIContext';
 import { useProjects } from '../contexts/ProjectsContext';
+import { useMasterChat } from '../contexts/MasterChatContext';
 import AIApiClient from '../services/api/AIApiClient';
 import { logger } from '../utils/errorHandling';
 import { toastManager } from '../utils/toastManager';
@@ -43,15 +51,30 @@ interface Message {
     repoUrl?: string;
     deploymentUrl?: string;
     actionType?: string;
+    workflowId?: string;
   };
+}
+
+interface WorkflowStatus {
+  id: string;
+  name: string;
+  status: 'pending' | 'in-progress' | 'completed' | 'failed';
+  steps: {
+    id: string;
+    name: string;
+    status: 'pending' | 'in-progress' | 'completed' | 'failed';
+    agentType: string;
+  }[];
+  progress: number;
 }
 
 const MasterChatAgentFull: React.FC = () => {
   const navigate = useNavigate();
   const { theme } = useTheme();
-  const { user, profile } = useAuth();
+  const { user, profile } = useEnhancedAuth();
   const { createSession } = useAI();
   const { projects, createProject } = useProjects();
+  const { activeWorkflow, getWorkflowStatus, cancelWorkflow } = useMasterChat();
   const isDark = theme === 'dark';
   
   const [messages, setMessages] = useState<Message[]>([
@@ -77,6 +100,7 @@ Tell me what you'd like to build or deploy today, or how I can help with your ex
   const [assistants, setAssistants] = useState<Array<{ id: string; name: string; type: string }>>([]);
   const [activeAssistantId, setActiveAssistantId] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [localWorkflow, setLocalWorkflow] = useState<WorkflowStatus | null>(null);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -85,6 +109,27 @@ Tell me what you'd like to build or deploy today, or how I can help with your ex
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+  
+  // Update local workflow state when activeWorkflow changes
+  useEffect(() => {
+    if (activeWorkflow) {
+      setLocalWorkflow(activeWorkflow);
+    }
+  }, [activeWorkflow]);
+  
+  // Poll for workflow status updates
+  useEffect(() => {
+    if (localWorkflow && (localWorkflow.status === 'pending' || localWorkflow.status === 'in-progress')) {
+      const interval = setInterval(() => {
+        const updatedStatus = getWorkflowStatus(localWorkflow.id);
+        if (updatedStatus) {
+          setLocalWorkflow(updatedStatus);
+        }
+      }, 2000);
+      
+      return () => clearInterval(interval);
+    }
+  }, [localWorkflow, getWorkflowStatus]);
 
   // Initialize assistants when user is loaded
   useEffect(() => {
@@ -129,6 +174,15 @@ Tell me what you'd like to build or deploy today, or how I can help with your ex
       } else {
         // Regular message - process with AI
         await processWithAI(messageText);
+        
+        // Check if the response contains a workflow ID
+        const lastMessage = messages[messages.length - 1];
+        if (lastMessage?.metadata?.workflowId) {
+          const workflowStatus = getWorkflowStatus(lastMessage.metadata.workflowId);
+          if (workflowStatus) {
+            setLocalWorkflow(workflowStatus);
+          }
+        }
       }
     } catch (error) {
       logger.error('Error processing message', error);
@@ -699,10 +753,11 @@ What specific assistance do you need today?`;
     const isSystem = message.type === 'system';
     const isFile = message.type === 'file';
     const isPending = message.status === 'pending';
+    const hasWorkflow = message.metadata?.workflowId && !isUser;
     
     return (
-      <div 
-        key={message.id} 
+      <div
+        key={message.id}
         className={`flex gap-3 ${isUser ? 'justify-end' : 'justify-start'} mb-4 animate-fadeIn`}
       >
         {!isUser && !isSystem && (
@@ -713,18 +768,18 @@ What specific assistance do you need today?`;
         
         <div className={`max-w-2xl ${isUser ? 'order-first' : ''}`}>
           <div className={`rounded-xl px-4 py-3 ${
-            isUser 
+            isUser
               ? 'bg-blue-600 text-white rounded-br-none'
               : isSystem
-                ? isDark 
-                  ? 'bg-yellow-600/20 text-yellow-200 border border-yellow-800/50' 
+                ? isDark
+                  ? 'bg-yellow-600/20 text-yellow-200 border border-yellow-800/50'
                   : 'bg-yellow-50 text-yellow-800 border border-yellow-200'
                 : isFile
                   ? isDark
                     ? 'bg-green-600/20 text-green-200 border border-green-800/50'
                     : 'bg-green-50 text-green-800 border border-green-200'
-                  : isDark 
-                    ? 'bg-gray-800 text-white rounded-bl-none' 
+                  : isDark
+                    ? 'bg-gray-800 text-white rounded-bl-none'
                     : 'bg-gray-100 text-gray-800 rounded-bl-none'
           }`}>
             {isPending ? (
@@ -767,7 +822,7 @@ What specific assistance do you need today?`;
                 {/* Render metadata actions if present */}
                 {message.metadata?.repoUrl && (
                   <div className="mt-2 flex items-center gap-2">
-                    <a 
+                    <a
                       href={message.metadata.repoUrl}
                       target="_blank"
                       rel="noopener noreferrer"
@@ -783,7 +838,7 @@ What specific assistance do you need today?`;
                 
                 {message.metadata?.deploymentUrl && (
                   <div className="mt-2 flex items-center gap-2">
-                    <a 
+                    <a
                       href={message.metadata.deploymentUrl}
                       target="_blank"
                       rel="noopener noreferrer"
@@ -796,6 +851,69 @@ What specific assistance do you need today?`;
                     </a>
                   </div>
                 )}
+                
+                {/* Render workflow status if this message has a workflow */}
+                {hasWorkflow && localWorkflow && message.metadata?.workflowId === localWorkflow.id && (
+                  <div className="mt-3 border-t pt-2 border-gray-700/30">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <Workflow size={14} className="text-blue-400" />
+                        <span className="font-medium text-sm">Workflow: {localWorkflow.name.length > 30 ? localWorkflow.name.substring(0, 30) + '...' : localWorkflow.name}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {localWorkflow.status === 'pending' && <Clock size={14} className="text-yellow-400" />}
+                        {localWorkflow.status === 'in-progress' && <Activity size={14} className="text-blue-400" />}
+                        {localWorkflow.status === 'completed' && <CheckCircle2 size={14} className="text-green-400" />}
+                        {localWorkflow.status === 'failed' && <AlertCircle size={14} className="text-red-400" />}
+                        <span className="text-xs capitalize">{localWorkflow.status}</span>
+                        
+                        {(localWorkflow.status === 'pending' || localWorkflow.status === 'in-progress') && (
+                          <button
+                            onClick={() => cancelWorkflow(localWorkflow.id)}
+                            className="p-1 rounded-full hover:bg-gray-700/50"
+                            title="Cancel workflow"
+                          >
+                            <XCircle size={14} className="text-red-400" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    
+                    {/* Progress bar */}
+                    <div className="w-full h-2 bg-gray-700/30 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full ${
+                          localWorkflow.status === 'completed' ? 'bg-green-500' :
+                          localWorkflow.status === 'failed' ? 'bg-red-500' :
+                          'bg-blue-500'
+                        }`}
+                        style={{ width: `${localWorkflow.progress}%` }}
+                      ></div>
+                    </div>
+                    
+                    {/* Steps */}
+                    <div className="mt-2 space-y-1">
+                      {localWorkflow.steps.map((step, index) => (
+                        <div key={step.id} className="flex items-center text-xs">
+                          <div className="w-5 flex-shrink-0">
+                            {step.status === 'pending' && <Clock size={12} className="text-gray-400" />}
+                            {step.status === 'in-progress' && <Loader size={12} className="text-blue-400 animate-spin" />}
+                            {step.status === 'completed' && <CheckCircle2 size={12} className="text-green-400" />}
+                            {step.status === 'failed' && <XCircle size={12} className="text-red-400" />}
+                          </div>
+                          <div className="flex-1 flex items-center justify-between">
+                            <span className="truncate">{index + 1}. {step.name}</span>
+                            <span className={`ml-2 px-1.5 py-0.5 rounded text-xs ${
+                              isDark ? 'bg-gray-700' : 'bg-gray-200'
+                            }`}>
+                              {step.agentType}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -806,6 +924,13 @@ What specific assistance do you need today?`;
             {message.type === 'agent' && message.metadata?.actionType && (
               <span className="ml-2 px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300">
                 {message.metadata.actionType}
+              </span>
+            )}
+            
+            {message.metadata?.workflowId && (
+              <span className="ml-2 px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300 flex items-center gap-1">
+                <Workflow size={10} />
+                <span>Workflow</span>
               </span>
             )}
           </div>
@@ -955,6 +1080,71 @@ What specific assistance do you need today?`;
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
             {messages.map(renderMessage)}
             <div ref={messagesEndRef} />
+            
+            {/* Active workflow indicator (when no message has the workflow) */}
+            {localWorkflow && !messages.some(m => m.metadata?.workflowId === localWorkflow.id) && (
+              <div className={`p-3 rounded-lg mb-4 ${
+                isDark ? 'bg-gray-800 border border-gray-700' : 'bg-white border border-gray-200'
+              }`}>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <Workflow size={16} className="text-blue-400" />
+                    <span className="font-medium">Active Workflow: {localWorkflow.name}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {localWorkflow.status === 'pending' && <Clock size={16} className="text-yellow-400" />}
+                    {localWorkflow.status === 'in-progress' && <Activity size={16} className="text-blue-400" />}
+                    {localWorkflow.status === 'completed' && <CheckCircle2 size={16} className="text-green-400" />}
+                    {localWorkflow.status === 'failed' && <AlertCircle size={16} className="text-red-400" />}
+                    <span className="text-sm capitalize">{localWorkflow.status}</span>
+                    
+                    {(localWorkflow.status === 'pending' || localWorkflow.status === 'in-progress') && (
+                      <button
+                        onClick={() => cancelWorkflow(localWorkflow.id)}
+                        className="p-1 rounded-full hover:bg-gray-700/50"
+                        title="Cancel workflow"
+                      >
+                        <XCircle size={16} className="text-red-400" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+                
+                {/* Progress bar */}
+                <div className="w-full h-2 bg-gray-700/30 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full ${
+                      localWorkflow.status === 'completed' ? 'bg-green-500' :
+                      localWorkflow.status === 'failed' ? 'bg-red-500' :
+                      'bg-blue-500'
+                    }`}
+                    style={{ width: `${localWorkflow.progress}%` }}
+                  ></div>
+                </div>
+                
+                {/* Steps */}
+                <div className="mt-3 space-y-2">
+                  {localWorkflow.steps.map((step, index) => (
+                    <div key={step.id} className="flex items-center text-sm">
+                      <div className="w-6 flex-shrink-0">
+                        {step.status === 'pending' && <Clock size={14} className="text-gray-400" />}
+                        {step.status === 'in-progress' && <Loader size={14} className="text-blue-400 animate-spin" />}
+                        {step.status === 'completed' && <CheckCircle2 size={14} className="text-green-400" />}
+                        {step.status === 'failed' && <XCircle size={14} className="text-red-400" />}
+                      </div>
+                      <div className="flex-1 flex items-center justify-between">
+                        <span>{index + 1}. {step.name}</span>
+                        <span className={`ml-2 px-2 py-0.5 rounded text-xs ${
+                          isDark ? 'bg-gray-700' : 'bg-gray-200'
+                        }`}>
+                          {step.agentType}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Input area */}

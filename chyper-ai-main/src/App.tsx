@@ -9,7 +9,8 @@ import { ProjectsProvider } from './contexts/ProjectsContext';
 import { AgentProvider } from './contexts/AgentContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import AIProvider from './contexts/AIContext';
-import { AuthProvider } from './contexts/AuthContext';
+import { EnhancedAuthProvider } from './contexts/EnhancedAuthContext';
+import { MasterChatProvider } from './contexts/MasterChatContext';
 import { LoginPage } from './pages/Auth/LoginPage';
 import { RegisterPage } from './pages/Auth/RegisterPage';
 import { ForgotPasswordPage } from './pages/Auth/ForgotPasswordPage';
@@ -19,6 +20,7 @@ import { AuthCallbackHandler } from './components/auth/AuthCallbackHandler';
 import { DatabaseErrorPage } from './pages/DatabaseErrorPage';
 import { AccountSettings } from './components/auth/AccountSettings';
 import { ProtectedRoute } from './components/auth/ProtectedRoute';
+import AuthDebugPage from './pages/Auth/AuthDebugPage';
 
 interface PinnedProject {
   id: string;
@@ -68,15 +70,17 @@ function App() {
 
   return (
     <ThemeProvider>
-      <AuthProvider>
+      <EnhancedAuthProvider>
         <ProjectsProvider>
           <AgentProvider>
             <AIProvider>
-              <Routes>
+              <MasterChatProvider>
+                <Routes>
                 {/* Error Routes */}
                 <Route path="/error/supabase" element={<SupabaseErrorPage />} />
                 <Route path="/error/database" element={<DatabaseErrorPage />} />
                 <Route path="/auth/callback" element={<AuthCallbackHandler />} />
+                <Route path="/auth/v1/callback" element={<AuthCallbackHandler />} />
                 
                 {/* Auth Routes */}
                 <Route path="/login" element={<LoginPage />} />
@@ -162,6 +166,23 @@ function App() {
                 <Route path="/" element={<Navigate to="/login" replace />} />
                 <Route path="*" element={<Navigate to="/dashboard" replace />} />
                 
+                {/* Auth Debug Route */}
+                <Route
+                  path="/auth/debug"
+                  element={
+                    <ProtectedRoute>
+                      <MainLayout
+                        currentView="dashboard"
+                        onViewChange={setCurrentView}
+                        pinnedProjects={pinnedProjects}
+                        activeProjectId={activeProjectId}
+                      >
+                        <AuthDebugPage />
+                      </MainLayout>
+                    </ProtectedRoute>
+                  }
+                />
+
                 {/* Full Screen Master Chat Agent route */}
                 <Route
                   path="/master-chat"
@@ -171,11 +192,12 @@ function App() {
                     </ProtectedRoute>
                   }
                 />
-              </Routes>
+                </Routes>
+              </MasterChatProvider>
             </AIProvider>
           </AgentProvider>
         </ProjectsProvider>
-      </AuthProvider>
+      </EnhancedAuthProvider>
     </ThemeProvider>
   );
 }

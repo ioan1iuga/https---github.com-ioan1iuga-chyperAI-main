@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useForm, SubmitHandler } from 'react-hook-form';
 import { AlertCircle, Check, Loader, Mail, ArrowLeft } from 'lucide-react';
-import { useAuth } from '../../contexts/AuthContext';
+import { useEnhancedAuth } from '../../contexts/EnhancedAuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
 
 interface ForgotPasswordFormInputs {
@@ -12,7 +12,7 @@ interface ForgotPasswordFormInputs {
 export const ForgotPasswordForm: React.FC = () => {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
-  const { resetPassword } = useAuth();
+  const { resetPassword } = useEnhancedAuth();
   
   const [formError, setFormError] = useState<string | null>(null);
   const [formSuccess, setFormSuccess] = useState<string | null>(null);

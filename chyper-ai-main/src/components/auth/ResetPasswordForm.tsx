@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useForm, SubmitHandler } from 'react-hook-form';
 import { Eye, EyeOff, AlertCircle, Check, Loader, ArrowLeft } from 'lucide-react';
-import { useAuth } from '../../contexts/AuthContext';
+import { useEnhancedAuth } from '../../contexts/EnhancedAuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
 
 interface ResetPasswordFormInputs {
@@ -13,7 +13,7 @@ interface ResetPasswordFormInputs {
 export const ResetPasswordForm: React.FC = () => {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
-  const { updatePassword } = useAuth();
+  const { updatePassword } = useEnhancedAuth();
   const navigate = useNavigate();
   
   const [showPassword, setShowPassword] = useState(false);

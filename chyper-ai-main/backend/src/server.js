@@ -1,68 +1,85 @@
-// Supabase Edge Function for Code Generation API
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { 
-  corsHeaders, 
-  handleCORS, 
-  createSupabaseClient,
-  getUser,
-  successResponse,
-  errorResponse,
-  unauthorizedResponse,
-  toResponse
-} from "../_shared/api.ts"
+// Express Server for ChyperAI Backend
+import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import { config } from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-serve(async (req) => {
-  // Handle CORS preflight requests
-  const corsResponse = handleCORS(req)
-  if (corsResponse) return corsResponse
+// Import routes
+import healthRoutes from './routes/health.js';
+import aiRoutes from './routes/ai.js';
+import authRoutes from './routes/auth.js';
+import deploymentsRoutes from './routes/deployments.js';
+import envRoutes from './routes/env.js';
+import integrationsRoutes from './routes/integrations.js';
+import metricsRoutes from './routes/metrics.js';
+import projectsRoutes from './routes/projects.js';
+import sessionRoutes from './routes/sessionRoutes.js';
+import terminalsRoutes from './routes/terminals.js';
+import workspaceRoutes from './routes/workspace.js';
 
-  try {
-    // Create Supabase client
-    const supabase = createSupabaseClient(req)
-    
-    // Get user
-    const user = await getUser(supabase)
+// Load environment variables
+config();
 
-    // Handle POST request for code generation
-    if (req.method === 'POST') {
-      if (!user) {
-        return toResponse(unauthorizedResponse(), corsHeaders)
-      }
+// Create Express app
+const app = express();
+const PORT = process.env.PORT || 3001;
 
-      const { prompt, language, context } = await req.json()
-      
-      // Mock response
-      const response = {
-        code: `// Generated code for: ${prompt}\n\nfunction example() {\n  console.log("Hello world");\n  return true;\n}`,
-        language: language || 'javascript',
-        explanation: "This is a sample implementation generated based on your prompt."
-      }
-      
-      // Record usage stats
-      const { error: usageError } = await supabase
-        .from('usage_stats')
-        .insert({
-          user_id: user.id,
-          provider: 'system',
-          model: 'mock',
-          type: 'code-generation',
-          input_tokens: 100,
-          output_tokens: 50
-        })
-      
-      if (usageError) {
-        console.error('Failed to record usage:', usageError)
-      }
+// Get __dirname equivalent in ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-      return toResponse(successResponse(response), corsHeaders)
+// Middleware
+app.use(helmet());
+app.use(cors({
+  origin: ['http://localhost:5173', 'http://localhost:5174', 'http://127.0.0.1:5173', 'http://127.0.0.1:5174'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
+}));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Routes
+app.use('/health', healthRoutes);
+app.use('/api/ai', aiRoutes);
+app.use('/api/auth', authRoutes);
+app.use('/api/deployments', deploymentsRoutes);
+app.use('/api/env', envRoutes);
+app.use('/api/integrations', integrationsRoutes);
+app.use('/api/metrics', metricsRoutes);
+app.use('/api/projects', projectsRoutes);
+app.use('/api/sessions', sessionRoutes);
+app.use('/api/terminals', terminalsRoutes);
+app.use('/api/workspace', workspaceRoutes);
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error('Server error:', err);
+  res.status(500).json({
+    success: false,
+    error: {
+      message: 'Internal server error',
+      details: process.env.NODE_ENV === 'development' ? err.message : undefined
     }
+  });
+});
 
-    // Method not supported
-    return toResponse(errorResponse('Method not supported', 405), corsHeaders)
-  } catch (error) {
-    // Handle any errors
-    console.error('Error processing code generation request:', error.message)
-    
-    return toResponse(errorResponse(error.message, 400), corsHeaders)
-  }
-})
+// Start server
+app.listen(PORT, () => {
+  console.log(`✅ Backend server running on http://localhost:${PORT}`);
+  console.log(`🔍 Health check endpoint: http://localhost:${PORT}/health`);
+  console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+});
+
+// Handle graceful shutdown
+process.on('SIGINT', () => {
+  console.log('Shutting down server gracefully...');
+  process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+  console.log('Shutting down server gracefully...');
+  process.exit(0);
+});

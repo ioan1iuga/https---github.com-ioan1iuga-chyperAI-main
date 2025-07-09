@@ -26,6 +26,7 @@
     "@reactflow/minimap": "^11.0.0",
     "@supabase/supabase-js": "^2.50.3",
     "cors": "^2.8.5",
+    "date-fns": "^4.1.0",
     "lucide-react": "^0.263.1",
     "pg": "^8.11.3",
     "react": "^18.3.1",

@@ -1,6 +1,6 @@
 import { Link, useNavigate } from 'react-router-dom';
-import { Eye, EyeOff, AlertCircle, Check, Loader, ExternalLink } from 'lucide-react'; 
-import { useAuth } from '../../contexts/AuthContext';
+import { Eye, EyeOff, AlertCircle, Check, Loader, ExternalLink } from 'lucide-react';
+import { useEnhancedAuth } from '../../contexts/EnhancedAuthContext';
 import { logger } from '../../utils/errorHandling';
 import { useTheme } from '../../contexts/ThemeContext';
 import React, { useState } from 'react';
@@ -24,7 +24,7 @@ export const RegisterForm: React.FC<RegisterFormProps> = ({
   const navigate = useNavigate();
   const { theme } = useTheme();
   const isDark = theme === 'dark';
-  const { signUp } = useAuth();
+  const { signUp } = useEnhancedAuth();
   
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);

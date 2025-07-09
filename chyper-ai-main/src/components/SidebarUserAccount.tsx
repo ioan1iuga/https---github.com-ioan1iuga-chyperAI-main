@@ -9,12 +9,12 @@ import {
   ChevronUp,
   UserCircle
 } from 'lucide-react';
-import { useAuth } from '../contexts/AuthContext';
+import { useEnhancedAuth } from '../contexts/EnhancedAuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { Link } from 'react-router-dom';
 
 export const SidebarUserAccount: React.FC = () => {
-  const { user, profile, signOut, isAuthenticated } = useAuth();
+  const { user, profile, signOut, isAuthenticated } = useEnhancedAuth();
   const { theme } = useTheme();
   const isDark = theme === 'dark';
   
@@ -168,13 +168,26 @@ export const SidebarUserAccount: React.FC = () => {
                   to="/help"
                   onClick={() => setIsOpen(false)}
                   className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors ${
-                    isDark 
-                      ? 'hover:bg-gray-600' 
+                    isDark
+                      ? 'hover:bg-gray-600'
                       : 'hover:bg-gray-200'
                   }`}
                 >
                   <HelpCircle size={16} />
                   <span>Help & Support</span>
+                </Link>
+
+                <Link
+                  to="/auth/debug"
+                  onClick={() => setIsOpen(false)}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors ${
+                    isDark
+                      ? 'hover:bg-gray-600 text-yellow-400 hover:text-yellow-300'
+                      : 'hover:bg-gray-200 text-yellow-600 hover:text-yellow-700'
+                  }`}
+                >
+                  <Shield size={16} />
+                  <span>Auth Debug</span>
                 </Link>
                 
                 <div className={`my-1 border-t ${
