@@ -76,7 +76,7 @@ export default defineConfig(({ command, mode }) => {
           rewrite: (path) => path
         },
         // WebSocket endpoint for terminals
-        '^/api/terminals': { 
+        '^/api/terminals/.*/ws': { 
           target: BACKEND_URL, 
           ws: true, 
           changeOrigin: true 
