@@ -1230,14 +1230,79 @@ export const EnhancedAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
     logger.info('Refreshing session');
     
     try {
-      // First try to refresh using Supabase if available
+      // FIRST PRIORITY: Check if we have a valid Supabase session in localStorage
+      // This is the most reliable source since it's managed by Supabase directly
+      try {
+        const supabaseSession = localStorage.getItem('supabase.auth.token');
+        if (supabaseSession) {
+          const parsedSession = JSON.parse(supabaseSession);
+          
+          if (parsedSession?.currentSession?.access_token) {
+            // Check if the token is expired
+            const isExpired = parsedSession.currentSession.expires_at &&
+              new Date(parsedSession.currentSession.expires_at * 1000) <= new Date();
+            
+            if (!isExpired) {
+              logger.info('Using valid Supabase session directly from localStorage');
+              
+              // Calculate expiry time
+              const expiresAt = parsedSession?.currentSession?.expires_at
+                ? new Date(parsedSession.currentSession.expires_at * 1000)
+                : new Date(Date.now() + 3600 * 1000); // Default to 1 hour if no expiry
+              
+              // Get refresh token if available
+              const refreshToken = parsedSession?.currentSession?.refresh_token ||
+                                  tokenManager.getRefreshToken();
+              
+              if (refreshToken) {
+                // Update token manager
+                tokenManager.setTokens(
+                  parsedSession.currentSession.access_token,
+                  refreshToken,
+                  expiresAt
+                );
+                
+                // Update session management service
+                sessionManagementService.setTokens(
+                  parsedSession.currentSession.access_token,
+                  refreshToken,
+                  expiresAt
+                );
+              }
+              
+              // Update API service token
+              apiService.setAuthToken(parsedSession.currentSession.access_token);
+              
+              // Update session state if available
+              if (parsedSession.currentSession.user) {
+                setSession(parsedSession.currentSession);
+                setUser(parsedSession.currentSession.user);
+              }
+              
+              // Emit event to notify that token has been refreshed
+              const event = new CustomEvent('auth:token-refreshed');
+              document.dispatchEvent(event);
+              logger.debug('auth:token-refreshed event dispatched from localStorage session');
+              
+              return { success: true, error: null };
+            } else {
+              logger.info('Supabase session found but expired, will attempt refresh');
+            }
+          }
+        }
+      } catch (localStorageError) {
+        logger.error('Error accessing Supabase session from localStorage', localStorageError);
+        // Continue to other refresh methods
+      }
+      
+      // SECOND PRIORITY: Try to refresh using Supabase's built-in refresh method
       if (supabase && isSupabaseConfigured) {
         try {
           logger.info('Attempting to refresh session with Supabase');
           const { data, error } = await supabase.auth.refreshSession();
           
           if (error) {
-            logger.warn('Supabase session refresh failed, falling back to session service', { error: error.message });
+            logger.warn('Supabase session refresh failed, will try other methods', { error: error.message });
           } else if (data.session) {
             logger.info('Supabase session refreshed successfully');
             
@@ -1276,54 +1341,64 @@ export const EnhancedAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
           }
         } catch (supabaseError) {
           logger.error('Error during Supabase refresh', supabaseError);
-          // Continue to session management service refresh
+          // Continue to other refresh methods
         }
       }
       
-      // Check if we have a Supabase session in localStorage that we can use directly
-      try {
-        const supabaseSession = localStorage.getItem('supabase.auth.token');
-        if (supabaseSession) {
-          logger.info('Found Supabase session in localStorage, attempting to use it directly');
-          const parsedSession = JSON.parse(supabaseSession);
+      // THIRD PRIORITY: Try to get the current session from Supabase
+      if (supabase && isSupabaseConfigured) {
+        try {
+          logger.info('Attempting to get current session from Supabase');
+          const { data } = await supabase.auth.getSession();
           
-          if (parsedSession?.currentSession?.access_token && parsedSession?.currentSession?.refresh_token) {
-            // Calculate expiry time
-            const expiresAt = parsedSession?.currentSession?.expires_at
-              ? new Date(parsedSession.currentSession.expires_at * 1000)
-              : new Date(Date.now() + 3600 * 1000); // Default to 1 hour if no expiry
+          if (data.session?.access_token) {
+            logger.info('Successfully retrieved current Supabase session');
             
-            // Update token manager
-            tokenManager.setTokens(
-              parsedSession.currentSession.access_token,
-              parsedSession.currentSession.refresh_token,
-              expiresAt
-            );
+            // Update our session state
+            setSession(data.session);
+            setUser(data.session.user);
             
-            // Update session management service
-            sessionManagementService.setTokens(
-              parsedSession.currentSession.access_token,
-              parsedSession.currentSession.refresh_token,
-              expiresAt
-            );
-            
-            // Update API service token
-            apiService.setAuthToken(parsedSession.currentSession.access_token);
-            
-            // Emit event to notify that token has been refreshed
-            const event = new CustomEvent('auth:token-refreshed');
-            document.dispatchEvent(event);
-            logger.debug('auth:token-refreshed event dispatched from localStorage session');
-            
-            return { success: true, error: null };
+            // Update tokens in both token managers
+            if (data.session.access_token) {
+              const expiresAt = new Date(Date.now() + 3600 * 1000); // 1 hour from now
+              const refreshToken = data.session.refresh_token || tokenManager.getRefreshToken();
+              
+              if (refreshToken) {
+                // Update token manager
+                tokenManager.setTokens(
+                  data.session.access_token,
+                  refreshToken,
+                  expiresAt
+                );
+                
+                // Update session management service
+                sessionManagementService.setTokens(
+                  data.session.access_token,
+                  refreshToken,
+                  expiresAt
+                );
+              }
+              
+              // Update API service token
+              apiService.setAuthToken(data.session.access_token);
+              
+              // Emit event to notify that token has been refreshed
+              const event = new CustomEvent('auth:token-refreshed');
+              document.dispatchEvent(event);
+              logger.debug('auth:token-refreshed event dispatched from getSession');
+              
+              return { success: true, error: null };
+            }
           }
+        } catch (getSessionError) {
+          logger.error('Error getting current Supabase session', getSessionError);
+          // Continue to session management service
         }
-      } catch (localStorageError) {
-        logger.error('Error accessing Supabase session from localStorage', localStorageError);
       }
       
-      // Fall back to session management service
+      // FOURTH PRIORITY: Fall back to session management service
       try {
+        logger.info('Attempting to refresh session via session management service');
         const result = await sessionManagementService.refreshSession();
         
         if (result.success) {
@@ -1347,66 +1422,68 @@ export const EnhancedAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
           const event = new CustomEvent('auth:token-refreshed');
           document.dispatchEvent(event);
           logger.debug('auth:token-refreshed event dispatched');
+          
+          return { success: true, error: null };
         } else {
-          // If API refresh failed with a network error, try to use Supabase session again
-          if (result.error?.includes('fetch') || result.error?.includes('network')) {
-            logger.warn('API refresh failed with network error, trying to use Supabase session directly');
+          // If API refresh failed with a network error, try to use Supabase session one more time
+          if (result.error?.includes('fetch') || result.error?.includes('network') ||
+              result.error?.includes('CORS')) {
             
-            // Try to get a new session from Supabase
-            if (supabase && isSupabaseConfigured) {
-              try {
-                const { data } = await supabase.auth.getSession();
-                if (data.session?.access_token) {
-                  logger.info('Successfully retrieved current Supabase session');
+            logger.warn('API refresh failed with network error, trying Supabase session one more time');
+            
+            // Try to get the session from localStorage again as a last resort
+            try {
+              const supabaseSession = localStorage.getItem('supabase.auth.token');
+              if (supabaseSession) {
+                const parsedSession = JSON.parse(supabaseSession);
+                
+                if (parsedSession?.currentSession?.access_token) {
+                  logger.info('Using Supabase session as final fallback');
                   
-                  // Update our session state
-                  setSession(data.session);
-                  setUser(data.session.user);
+                  // Update API service token
+                  apiService.setAuthToken(parsedSession.currentSession.access_token);
                   
-                  // Update tokens in both token managers
-                  if (data.session.access_token) {
-                    const expiresAt = new Date(Date.now() + 3600 * 1000); // 1 hour from now
-                    const refreshToken = data.session.refresh_token || tokenManager.getRefreshToken();
-                    
-                    if (refreshToken) {
-                      // Update token manager
-                      tokenManager.setTokens(
-                        data.session.access_token,
-                        refreshToken,
-                        expiresAt
-                      );
-                      
-                      // Update session management service
-                      sessionManagementService.setTokens(
-                        data.session.access_token,
-                        refreshToken,
-                        expiresAt
-                      );
-                      
-                      // Update API service token
-                      apiService.setAuthToken(data.session.access_token);
-                      
-                      // Emit event to notify that token has been refreshed
-                      const event = new CustomEvent('auth:token-refreshed');
-                      document.dispatchEvent(event);
-                      logger.debug('auth:token-refreshed event dispatched from getSession');
-                      
-                      return { success: true, error: null };
-                    }
-                  }
+                  // Emit event to notify that token has been refreshed
+                  const event = new CustomEvent('auth:token-refreshed');
+                  document.dispatchEvent(event);
+                  logger.debug('auth:token-refreshed event dispatched from final fallback');
+                  
+                  return { success: true, error: null };
                 }
-              } catch (supabaseError) {
-                logger.error('Error getting Supabase session as fallback', supabaseError);
               }
+            } catch (finalError) {
+              logger.error('Error in final Supabase session fallback', finalError);
             }
           }
           
           logger.error('Failed to refresh session', { error: result.error });
+          return result;
         }
-        
-        return result;
       } catch (sessionServiceError) {
         logger.error('Error during session service refresh', sessionServiceError);
+        
+        // Final attempt to use Supabase session
+        try {
+          const supabaseSession = localStorage.getItem('supabase.auth.token');
+          if (supabaseSession) {
+            const parsedSession = JSON.parse(supabaseSession);
+            
+            if (parsedSession?.currentSession?.access_token) {
+              logger.info('Using Supabase session after all refresh methods failed');
+              
+              // Update API service token
+              apiService.setAuthToken(parsedSession.currentSession.access_token);
+              
+              // Emit event to notify that token has been refreshed
+              const event = new CustomEvent('auth:token-refreshed');
+              document.dispatchEvent(event);
+              
+              return { success: true, error: null };
+            }
+          }
+        } catch (finalError) {
+          logger.error('Error in emergency Supabase session fallback', finalError);
+        }
         
         // If all refresh attempts fail, return error
         return {
@@ -1416,6 +1493,26 @@ export const EnhancedAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
       }
     } catch (error) {
       logger.error('Error refreshing session', error);
+      
+      // Last-ditch effort to use Supabase session
+      try {
+        const supabaseSession = localStorage.getItem('supabase.auth.token');
+        if (supabaseSession) {
+          const parsedSession = JSON.parse(supabaseSession);
+          
+          if (parsedSession?.currentSession?.access_token) {
+            logger.info('Using Supabase session after catastrophic error');
+            
+            // Update API service token
+            apiService.setAuthToken(parsedSession.currentSession.access_token);
+            
+            return { success: true, error: null };
+          }
+        }
+      } catch (finalError) {
+        logger.error('Error in last-resort Supabase session fallback', finalError);
+      }
+      
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to refresh session'

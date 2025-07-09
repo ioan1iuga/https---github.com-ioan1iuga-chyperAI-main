@@ -189,48 +189,80 @@ class SessionManagementService {
     baseDelay = 1000
   ): Promise<{ success: boolean; error: string | null }> {
     try {
+      // FIRST PRIORITY: Check if we have a valid Supabase session in localStorage
+      const supabaseSession = localStorage.getItem('supabase.auth.token');
+      if (supabaseSession) {
+        try {
+          const parsedSession = JSON.parse(supabaseSession);
+          if (parsedSession?.currentSession?.access_token) {
+            // Check if the token is expired
+            const isExpired = parsedSession.currentSession.expires_at &&
+              new Date(parsedSession.currentSession.expires_at * 1000) <= new Date();
+            
+            if (!isExpired) {
+              logger.info('Using valid Supabase session directly from localStorage');
+              
+              // Set the token from Supabase session
+              this.token = parsedSession.currentSession.access_token;
+              
+              // Set refresh token if available
+              if (parsedSession?.currentSession?.refresh_token) {
+                this.refreshToken = parsedSession.currentSession.refresh_token;
+              }
+              
+              // Set expiry if available
+              if (parsedSession?.currentSession?.expires_at) {
+                this.expiresAt = new Date(parsedSession.currentSession.expires_at * 1000);
+              } else if (parsedSession?.currentSession?.expires_in) {
+                this.expiresAt = new Date(Date.now() + parsedSession.currentSession.expires_in * 1000);
+              } else {
+                // Default expiry if not available
+                this.expiresAt = new Date(Date.now() + 3600 * 1000); // 1 hour
+              }
+              
+              // Store tokens
+              this.storeTokens();
+              
+              // Set up refresh timer
+              this.setupRefreshTimer();
+              
+              // Update API service token
+              if (this.token) {
+                apiService.setAuthToken(this.token);
+              }
+              
+              // Notify that token has been refreshed
+              document.dispatchEvent(new CustomEvent('auth:token-refreshed'));
+              
+              return { success: true, error: null };
+            } else {
+              logger.info('Supabase session found but expired, will attempt refresh');
+            }
+          }
+        } catch (e) {
+          logger.error('Failed to parse Supabase session during refresh', e);
+          // Continue to other refresh methods
+        }
+      }
+      
+      // SECOND PRIORITY: Check if we have a refresh token
       if (!this.refreshToken) {
-        logger.warn('Cannot refresh session: No refresh token available');
+        logger.warn('No refresh token available in session service');
         
-        // Try to get token from Supabase session if available
-        const supabaseSession = localStorage.getItem('supabase.auth.token');
+        // Try to get token from Supabase session if available (already checked above, but double-check)
         if (supabaseSession) {
           try {
             const parsedSession = JSON.parse(supabaseSession);
             if (parsedSession?.currentSession?.refresh_token) {
               this.refreshToken = parsedSession.currentSession.refresh_token;
               logger.info('Retrieved refresh token from Supabase session for refresh');
-              
-              // Also set expiry if available
-              if (parsedSession?.currentSession?.expires_at) {
-                this.expiresAt = new Date(parsedSession.currentSession.expires_at * 1000);
-              } else if (parsedSession?.currentSession?.expires_in) {
-                this.expiresAt = new Date(Date.now() + parsedSession.currentSession.expires_in * 1000);
-              }
-              
-              // If we also have an access token, set it
-              if (parsedSession?.currentSession?.access_token) {
-                this.token = parsedSession.currentSession.access_token;
-                apiService.setAuthToken(this.token);
-                logger.info('Retrieved access token from Supabase session');
-                
-                // Store tokens for future use
-                this.storeTokens();
-                
-                // Set up refresh timer
-                this.setupRefreshTimer();
-                
-                // Notify that token has been refreshed
-                document.dispatchEvent(new CustomEvent('auth:token-refreshed'));
-                
-                return { success: true, error: null };
-              }
             }
           } catch (e) {
-            logger.error('Failed to parse Supabase session during refresh', e);
+            logger.error('Failed to parse Supabase session when looking for refresh token', e);
           }
         }
         
+        // If we still don't have a refresh token, return error
         if (!this.refreshToken) {
           return {
             success: false,
@@ -239,6 +271,7 @@ class SessionManagementService {
         }
       }
       
+      // THIRD PRIORITY: Try API refresh with the refresh token
       logger.info(`Attempting to refresh session${retryCount > 0 ? ` (retry ${retryCount}/${maxRetries})` : ''}`);
       
       // Log the refresh token (first few characters) for debugging
@@ -246,6 +279,7 @@ class SessionManagementService {
       logger.debug('Using refresh token for session refresh', { tokenPreview });
       
       try {
+        // Attempt API refresh
         const response = await apiService.post<ApiResponse<TokenResponse>>('/api/sessions/refresh', {
           refreshToken: this.refreshToken
         });
@@ -274,7 +308,7 @@ class SessionManagementService {
           // Notify that token has been refreshed
           document.dispatchEvent(new CustomEvent('auth:token-refreshed'));
           
-          logger.info('Session refreshed successfully');
+          logger.info('Session refreshed successfully via API');
           return { success: true, error: null };
         } else {
           // If the error indicates an invalid refresh token, clear tokens and don't retry
@@ -282,6 +316,30 @@ class SessionManagementService {
               response?.error?.includes('expired_token') ||
               response?.error?.includes('unauthorized')) {
             logger.error('Invalid or expired refresh token', response?.error);
+            
+            // Try Supabase session one more time before giving up
+            if (supabaseSession) {
+              try {
+                const parsedSession = JSON.parse(supabaseSession);
+                if (parsedSession?.currentSession?.access_token) {
+                  logger.info('Using Supabase session after invalid token error');
+                  
+                  // Set the token from Supabase session
+                  this.token = parsedSession.currentSession.access_token;
+                  if (this.token) {
+                apiService.setAuthToken(this.token);
+              }
+                  
+                  // Notify that token has been refreshed
+                  document.dispatchEvent(new CustomEvent('auth:token-refreshed'));
+                  
+                  return { success: true, error: null };
+                }
+              } catch (e) {
+                logger.error('Failed to parse Supabase session during invalid token handling', e);
+              }
+            }
+            
             this.clearTokens();
             return {
               success: false,
@@ -301,6 +359,30 @@ class SessionManagementService {
             return this.refreshSession(retryCount + 1, maxRetries, baseDelay);
           } else {
             logger.error(`Failed to refresh session after ${maxRetries} attempts`, response?.error);
+            
+            // Try Supabase session one more time before giving up
+            if (supabaseSession) {
+              try {
+                const parsedSession = JSON.parse(supabaseSession);
+                if (parsedSession?.currentSession?.access_token) {
+                  logger.info('Using Supabase session after max retries');
+                  
+                  // Set the token from Supabase session
+                  this.token = parsedSession.currentSession.access_token;
+                  if (this.token) {
+                apiService.setAuthToken(this.token);
+              }
+                  
+                  // Notify that token has been refreshed
+                  document.dispatchEvent(new CustomEvent('auth:token-refreshed'));
+                  
+                  return { success: true, error: null };
+                }
+              } catch (e) {
+                logger.error('Failed to parse Supabase session during max retries handling', e);
+              }
+            }
+            
             return {
               success: false,
               error: response?.error || `Failed to refresh token after ${maxRetries} attempts`
@@ -309,11 +391,13 @@ class SessionManagementService {
         }
       } catch (apiError) {
         // Handle CORS errors specifically
-        if (apiError instanceof TypeError && apiError.message.includes('fetch')) {
-          logger.error('CORS error during token refresh', apiError);
+        if (apiError instanceof TypeError &&
+            (apiError.message.includes('fetch') || apiError.message.includes('network') ||
+             apiError.message.includes('CORS'))) {
           
-          // For CORS errors, try to use Supabase session directly
-          const supabaseSession = localStorage.getItem('supabase.auth.token');
+          logger.error('CORS/network error during token refresh', apiError);
+          
+          // For CORS errors, immediately try to use Supabase session directly
           if (supabaseSession) {
             try {
               const parsedSession = JSON.parse(supabaseSession);
@@ -388,6 +472,31 @@ class SessionManagementService {
         return this.refreshSession(retryCount + 1, maxRetries, baseDelay);
       } else {
         logger.error(`Error refreshing session after ${maxRetries} attempts`, error);
+        
+        // Final attempt to use Supabase session
+        const supabaseSession = localStorage.getItem('supabase.auth.token');
+        if (supabaseSession) {
+          try {
+            const parsedSession = JSON.parse(supabaseSession);
+            if (parsedSession?.currentSession?.access_token) {
+              logger.info('Using Supabase session after all refresh attempts failed');
+              
+              // Set the token from Supabase session
+              this.token = parsedSession.currentSession.access_token;
+              if (this.token) {
+                apiService.setAuthToken(this.token);
+              }
+              
+              // Notify that token has been refreshed
+              document.dispatchEvent(new CustomEvent('auth:token-refreshed'));
+              
+              return { success: true, error: null };
+            }
+          } catch (e) {
+            logger.error('Failed to parse Supabase session during final error handling', e);
+          }
+        }
+        
         return {
           success: false,
           error: error instanceof Error

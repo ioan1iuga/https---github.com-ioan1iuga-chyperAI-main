@@ -61,49 +61,64 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
       try {
         logger.info('Validating session for protected route', { path: location.pathname });
         
-        // First check if we have a token in sessionStorage
+        // FIRST PRIORITY: Try to use Supabase session directly from localStorage
+        // This is the most reliable source since it's managed by Supabase directly
+        const supabaseSession = localStorage.getItem('supabase.auth.token');
+        if (supabaseSession) {
+          try {
+            const parsedSession = JSON.parse(supabaseSession);
+            if (parsedSession?.currentSession?.access_token) {
+              // Check if the token is expired
+              const isExpired = parsedSession.currentSession.expires_at &&
+                new Date(parsedSession.currentSession.expires_at * 1000) <= new Date();
+              
+              if (!isExpired) {
+                logger.info('Using valid Supabase session directly from localStorage');
+                
+                // Set the access token for API calls
+                apiService.setAuthToken(parsedSession.currentSession.access_token);
+                
+                // Store tokens in sessionStorage for backup
+                if (parsedSession.currentSession.refresh_token) {
+                  sessionStorage.setItem('auth_refresh_token', parsedSession.currentSession.refresh_token);
+                  logger.debug('Stored refresh token in sessionStorage from Supabase session');
+                }
+                
+                // Store expiry in sessionStorage
+                if (parsedSession.currentSession.expires_at) {
+                  const expiresAt = new Date(parsedSession.currentSession.expires_at * 1000);
+                  sessionStorage.setItem('auth_token_expiry', expiresAt.toISOString());
+                  logger.debug('Stored token expiry in sessionStorage from Supabase session');
+                }
+                
+                if (isMounted) {
+                  setIsSessionValid(true);
+                  setIsValidatingSession(false);
+                }
+                return;
+              } else {
+                logger.info('Supabase session found but expired, will attempt refresh');
+              }
+            }
+          } catch (e) {
+            logger.error('Failed to parse Supabase session', e);
+          }
+        }
+        
+        // SECOND PRIORITY: Check if we have tokens in sessionStorage
         const refreshToken = sessionStorage.getItem('auth_refresh_token');
         const tokenExpiry = sessionStorage.getItem('auth_token_expiry');
         
         if (!refreshToken) {
           logger.warn('No refresh token found in sessionStorage during route protection check');
           
-          // Try to get token from Supabase session if available
-          const supabaseSession = localStorage.getItem('supabase.auth.token');
-          if (supabaseSession) {
-            try {
-              const parsedSession = JSON.parse(supabaseSession);
-              if (parsedSession?.currentSession?.refresh_token) {
-                // Store it in sessionStorage for future use
-                sessionStorage.setItem('auth_refresh_token', parsedSession.currentSession.refresh_token);
-                logger.info('Restored refresh token from Supabase session during route check');
-                
-                // Also set token expiry if available
-                if (parsedSession?.currentSession?.expires_at) {
-                  const expiresAt = new Date(parsedSession.currentSession.expires_at * 1000);
-                  sessionStorage.setItem('auth_token_expiry', expiresAt.toISOString());
-                  logger.info('Restored token expiry from Supabase session during route check');
-                } else if (parsedSession?.currentSession?.expires_in) {
-                  // If we have expires_in instead of expires_at, calculate expiry
-                  const expiresAt = new Date(Date.now() + parsedSession.currentSession.expires_in * 1000);
-                  sessionStorage.setItem('auth_token_expiry', expiresAt.toISOString());
-                  logger.info('Calculated token expiry from Supabase session during route check');
-                }
-                
-                // If we also have an access token, set it directly in the API service
-                if (parsedSession?.currentSession?.access_token) {
-                  logger.info('Setting access token from Supabase session directly');
-                  apiService.setAuthToken(parsedSession.currentSession.access_token);
-                }
-              }
-            } catch (e) {
-              logger.error('Failed to parse Supabase session during route check', e);
-            }
-          }
+          // Already tried Supabase session above, so if we get here and still don't have a token,
+          // we'll continue to API validation which will likely fail
         }
         
-        // Now validate the session
+        // THIRD PRIORITY: Try API validation with fallbacks
         try {
+          // Attempt to validate the session through the API
           const result = await validateSession();
           
           if (isMounted) {
@@ -113,7 +128,27 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
                 error: result.error
               });
               
-              // If validation failed, try to refresh the session
+              // If validation failed with a network error, immediately use Supabase session
+              if (result.error?.includes('fetch') || result.error?.includes('network') ||
+                  result.error?.includes('CORS')) {
+                
+                // Try Supabase session again as a fallback
+                if (supabaseSession) {
+                  try {
+                    const parsedSession = JSON.parse(supabaseSession);
+                    if (parsedSession?.currentSession?.access_token) {
+                      logger.info('Using Supabase session after API validation failure');
+                      apiService.setAuthToken(parsedSession.currentSession.access_token);
+                      setIsSessionValid(true);
+                      return;
+                    }
+                  } catch (e) {
+                    logger.error('Failed to parse Supabase session during fallback', e);
+                  }
+                }
+              }
+              
+              // If not a network error or Supabase fallback failed, try to refresh the session
               try {
                 logger.info('Attempting to refresh session after validation failure');
                 const refreshResult = await refreshSession();
@@ -122,22 +157,21 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
                   logger.info('Session refreshed successfully after validation failure');
                   setIsSessionValid(true);
                 } else {
-                  // If refresh failed with a network error, try to use Supabase session directly
-                  if (refreshResult.error?.includes('fetch') || refreshResult.error?.includes('network')) {
-                    logger.warn('Network error during refresh, trying to use Supabase session directly');
+                  // If refresh failed with a network error, try Supabase session one more time
+                  if (refreshResult.error?.includes('fetch') || refreshResult.error?.includes('network') ||
+                      refreshResult.error?.includes('CORS')) {
                     
-                    const supabaseSession = localStorage.getItem('supabase.auth.token');
                     if (supabaseSession) {
                       try {
                         const parsedSession = JSON.parse(supabaseSession);
                         if (parsedSession?.currentSession?.access_token) {
-                          logger.info('Using Supabase session directly due to network error');
+                          logger.info('Using Supabase session after refresh failure');
                           apiService.setAuthToken(parsedSession.currentSession.access_token);
                           setIsSessionValid(true);
                           return;
                         }
                       } catch (e) {
-                        logger.error('Failed to parse Supabase session during network error handling', e);
+                        logger.error('Failed to parse Supabase session during final fallback', e);
                       }
                     }
                   }
@@ -148,7 +182,24 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
                   setIsSessionValid(false);
                 }
               } catch (refreshError) {
+                // Handle refresh error with Supabase fallback
                 logger.error('Error during session refresh after validation failure', refreshError);
+                
+                // Try Supabase session one last time
+                if (supabaseSession) {
+                  try {
+                    const parsedSession = JSON.parse(supabaseSession);
+                    if (parsedSession?.currentSession?.access_token) {
+                      logger.info('Using Supabase session after refresh error');
+                      apiService.setAuthToken(parsedSession.currentSession.access_token);
+                      setIsSessionValid(true);
+                      return;
+                    }
+                  } catch (e) {
+                    logger.error('Failed to parse Supabase session during error fallback', e);
+                  }
+                }
+                
                 setIsSessionValid(false);
               }
             } else {
@@ -157,36 +208,51 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
             }
           }
         } catch (validationError) {
-          // If validation fails with a network error, try to use Supabase session directly
-          if (validationError instanceof Error &&
-              (validationError.message.includes('fetch') || validationError.message.includes('network'))) {
-            logger.warn('Network error during validation, trying to use Supabase session directly');
-            
-            const supabaseSession = localStorage.getItem('supabase.auth.token');
-            if (supabaseSession) {
-              try {
-                const parsedSession = JSON.parse(supabaseSession);
-                if (parsedSession?.currentSession?.access_token) {
-                  logger.info('Using Supabase session directly due to network error');
-                  apiService.setAuthToken(parsedSession.currentSession.access_token);
-                  if (isMounted) {
-                    setIsSessionValid(true);
-                  }
+          // If validation fails with any error, immediately try Supabase session
+          logger.error('Error validating session for protected route', validationError);
+          
+          if (supabaseSession) {
+            try {
+              const parsedSession = JSON.parse(supabaseSession);
+              if (parsedSession?.currentSession?.access_token) {
+                logger.info('Using Supabase session after validation error');
+                apiService.setAuthToken(parsedSession.currentSession.access_token);
+                if (isMounted) {
+                  setIsSessionValid(true);
                   return;
                 }
-              } catch (e) {
-                logger.error('Failed to parse Supabase session during network error handling', e);
               }
+            } catch (e) {
+              logger.error('Failed to parse Supabase session during error handling', e);
             }
           }
           
-          logger.error('Error validating session for protected route', validationError);
           if (isMounted) {
             setIsSessionValid(false);
           }
         }
       } catch (error) {
         logger.error('Unexpected error in session check', error);
+        
+        // Final attempt to use Supabase session
+        const supabaseSession = localStorage.getItem('supabase.auth.token');
+        if (supabaseSession) {
+          try {
+            const parsedSession = JSON.parse(supabaseSession);
+            if (parsedSession?.currentSession?.access_token) {
+              logger.info('Using Supabase session after unexpected error');
+              apiService.setAuthToken(parsedSession.currentSession.access_token);
+              if (isMounted) {
+                setIsSessionValid(true);
+                setIsValidatingSession(false);
+                return;
+              }
+            }
+          } catch (e) {
+            logger.error('Failed to parse Supabase session during final error handling', e);
+          }
+        }
+        
         if (isMounted) {
           setIsSessionValid(false);
         }
