@@ -34,7 +34,6 @@ export default defineConfig(({ command, mode }) => {
       hmr: {
         // Explicitly configure HMR
         protocol: 'ws',
-        host: 'localhost',
         // Don't specify port to use server port automatically
         // Increase timeout for WebSocket connection
         timeout: 30000,
