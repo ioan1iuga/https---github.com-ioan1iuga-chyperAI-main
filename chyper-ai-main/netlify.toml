@@ -1,0 +1,75 @@
+# Netlify configuration
+
+# Handle SPA routing
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# API proxy - replace with your actual Supabase URL
+[[redirects]]
+  from = "/api/*"
+  to = "https://ikdfodvjjuflmgmiobnb.supabase.co/functions/v1/:splat"
+  status = 200
+  force = true
+  headers = {Authorization = "Bearer ${SUPABASE_ANON_KEY}"}
+
+# Build settings
+[build]
+  command = "npm run build:all"
+  publish = "dist"
+  environment = { NODE_VERSION = "18" }
+
+# Post processing settings
+[build.processing]
+  skip_processing = false
+
+[build.processing.css]
+  bundle = true
+  minify = true
+
+[build.processing.js]
+  bundle = true
+  minify = true
+
+[build.processing.html]
+  pretty_urls = true
+
+[build.processing.images]
+  compress = true
+
+# Environment variable configuration
+[context.production.environment]
+  VITE_APP_ENV = "production"
+
+[context.deploy-preview.environment]
+  VITE_APP_ENV = "preview"
+  
+[context.branch-deploy.environment]
+  VITE_APP_ENV = "staging"
+
+# Headers to set security and caching rules
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-XSS-Protection = "1; mode=block"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Content-Security-Policy = "default-src 'self'; connect-src 'self' https://*.supabase.co https://ikdfodvjjuflmgmiobnb.supabase.co https://*.supabase.co; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' https://images.pexels.com data:; font-src 'self';"
+
+# Cache static assets
+[[headers]]
+  for = "/*.js"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/*.css"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"

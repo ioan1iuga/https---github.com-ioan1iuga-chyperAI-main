@@ -1,0 +1,179 @@
+# Cloudflare Workers Configuration for ChyperAI Platform
+
+name = "chyper-ai-platform"
+main = "src/workers/index.ts"
+compatibility_date = "2024-01-15"
+compatibility_flags = ["nodejs_compat"]
+
+# Worker Settings
+[build]
+command = "npm run build:worker"
+cwd = "."
+watch_dir = "src"
+
+# Environment Variables for Development
+[env.development]
+name = "chyper-ai-platform-dev"
+
+[env.development.vars]
+ENVIRONMENT = "development"
+NODE_ENV = "development"
+API_BASE_URL = "https://api-dev.chyper.ai"
+FRONTEND_URL = "https://dev.chyper.ai"
+
+# Environment Variables for Staging
+[env.staging]
+name = "chyper-ai-platform-staging"
+
+[env.staging.vars]
+ENVIRONMENT = "staging"
+NODE_ENV = "staging"
+API_BASE_URL = "https://api-staging.chyper.ai"
+FRONTEND_URL = "https://staging.chyper.ai"
+
+# Environment Variables for Production
+[env.production]
+name = "chyper-ai-platform"
+
+[env.production.vars]
+ENVIRONMENT = "production"
+NODE_ENV = "production" 
+API_BASE_URL = "https://api.chyper.ai" 
+FRONTEND_URL = "https://chyper.ai"
+DEPLOYMENT_DOMAIN = "workers.chyper.ai"
+
+# KV Namespaces
+[[kv_namespaces]]
+binding = "CACHE"
+# Set these values using environment variables or Cloudflare Dashboard
+id = ""
+preview_id = ""
+
+[[kv_namespaces]]
+binding = "SESSIONS"
+# Set these values using environment variables or Cloudflare Dashboard
+id = ""
+preview_id = ""
+
+[[kv_namespaces]]
+binding = "USER_DATA"
+# Set these values using environment variables or Cloudflare Dashboard
+id = ""
+preview_id = ""
+
+# Durable Objects
+[[durable_objects.bindings]]
+name = "COLLABORATION"
+class_name = "CollaborationRoom"
+script_name = "chyper-ai-platform"
+
+[[durable_objects.bindings]]
+name = "TERMINAL_SESSIONS"
+class_name = "TerminalSession"
+script_name = "chyper-ai-platform"
+
+[[durable_objects.bindings]]
+name = "LIVE_PREVIEW"
+class_name = "LivePreviewSession"
+script_name = "chyper-ai-platform"
+
+# D1 Database
+[[d1_databases]]
+binding = "DB"
+database_name = "chyper-ai-database"
+# Set this value using environment variables or Cloudflare Dashboard
+database_id = "" 
+
+# R2 Storage
+[[r2_buckets]]
+binding = "STORAGE"
+bucket_name = "chyper-ai-storage"
+preview_bucket_name = "chyper-ai-storage-preview"
+
+[[r2_buckets]]
+binding = "FILE_UPLOADS"
+bucket_name = "chyper-ai-uploads"
+preview_bucket_name = "chyper-ai-uploads-preview"
+
+# Analytics Engine
+[[analytics_engine_datasets]]
+binding = "ANALYTICS"
+
+# Queues
+[[queues.producers]]
+binding = "BUILD_QUEUE"
+queue = "build-queue"
+
+[[queues.producers]]
+binding = "DEPLOYMENT_QUEUE"
+queue = "deployment-queue"
+
+[[queues.producers]]
+binding = "NOTIFICATION_QUEUE"
+queue = "notification-queue"
+
+[[queues.consumers]]
+queue = "build-queue"
+max_batch_size = 10
+max_batch_timeout = 30
+max_retries = 3
+
+[[queues.consumers]]
+queue = "deployment-queue"
+max_batch_size = 5
+max_batch_timeout = 60
+max_retries = 5
+
+[[queues.consumers]]
+queue = "notification-queue"
+max_batch_size = 20
+max_batch_timeout = 10
+max_retries = 2
+
+# Service Bindings
+[[services]]
+binding = "AUTH_SERVICE"
+service = "chyper-ai-auth"
+environment = "production"
+
+[[services]]
+binding = "FILE_SERVICE"
+service = "chyper-ai-files"
+environment = "production"
+
+[[services]]
+binding = "AI_SERVICE"
+service = "chyper-ai-assistant"
+environment = "production"
+
+# WebAssembly Modules
+[[wasm_modules]]
+binding = "WASM_MODULE"
+source = "./path/to/module.wasm"
+
+# Text and Data Blobs
+[[text_blobs]]
+binding = "TEMPLATES"
+source = "./templates"
+
+[[data_blobs]]
+binding = "ASSETS"
+source = "./assets/data.bin"
+
+# Custom domains (configure these in Cloudflare Dashboard)
+# routes = [
+#   { pattern = "chyper.ai/*", zone_name = "chyper.ai" },
+#   { pattern = "api.chyper.ai/*", zone_name = "chyper.ai" }
+# ]
+
+# Worker Limits
+[limits]
+cpu_ms = 50000
+
+# Trigger events for deployments and scheduled tasks
+[[triggers]]
+crons = ["0 0 * * *"] # Run daily at midnight UTC
+
+# Environment variables for development
+[vars]
+DEPLOYMENT_DOMAIN = "dev.chyper.ai"
